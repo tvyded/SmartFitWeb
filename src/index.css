@@ -2377,3 +2377,48 @@ body {
     .workout-history-entry-card { flex-direction: column; align-items: flex-start; gap: 14px; }
     .history-entry-right { width: 100%; justify-content: space-between; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   СОЦИАЛЬНАЯ СЕТЬ (SOCIAL FEED & FAB)
+   ════════════════════════════════════════════════════════════════ */
+@keyframes modalSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px) scale(0.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.social-screen {
+    animation: fadeIn 0.25s ease-out;
+}
+
+.dash-nav-tab-btn {
+    border: 1.5px solid #e5e5e5;
+    background: #ffffff;
+    border-radius: 100px;
+    padding: 6px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #444;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dash-nav-tab-btn:hover {
+    border-color: #171717;
+    color: #171717;
+    background: #fafafa;
+}
+
+.dash-nav-tab-btn.active {
+    background: #171717;
+    color: #ffffff;
+    border-color: #171717;
+}

@@ -1,4 +1,4 @@
-export type Screen = 'landing' | 'login' | 'register' | 'dashboard' | 'builder' | 'runner' | 'history';
+export type Screen = 'landing' | 'login' | 'register' | 'dashboard' | 'builder' | 'runner' | 'history' | 'social';
 
 export type ExerciseKey =
   | 'squat'
@@ -16,7 +16,29 @@ export interface User {
   firstName: string;
   lastName: string;
   email: string;
+  avatar?: string;
 }
+
+export interface SocialPost {
+  id: string;
+  authorId?: string;
+  authorName: string;
+  authorAvatar: string;
+  content: string;
+  createdAt: string;
+  likesCount: number;
+  isLiked: boolean;
+}
+
+export const AVATAR_OPTIONS = [
+  { id: 'lion', emoji: '🦁', name: 'Лев' },
+  { id: 'lightning', emoji: '⚡', name: 'Молния' },
+  { id: 'cyborg', emoji: '🦾', name: 'Киборг' },
+  { id: 'eagle', emoji: '🦅', name: 'Орёл' },
+  { id: 'fire', emoji: '🔥', name: 'Огонь' }
+];
+
+export const DEFAULT_AVATAR = '⚡';
 
 export interface DiaryEntry {
   id: number;

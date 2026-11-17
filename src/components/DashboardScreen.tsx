@@ -1,5 +1,5 @@
 import React from 'react';
-import { CompletedWorkoutSession, DailyTargets, DiaryEntry, User, WorkoutSet } from '../types';
+import { CompletedWorkoutSession, DEFAULT_AVATAR, DailyTargets, DiaryEntry, User, WorkoutSet } from '../types';
 import { Sound } from '../utils/sound';
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   onStartWorkout: () => void;
   onOpenDrawer: () => void;
   onOpenHistory: () => void;
+  onOpenSocial: () => void;
   workoutSets: WorkoutSet[];
   diaryEntries: DiaryEntry[];
   targets: DailyTargets;
@@ -18,12 +19,14 @@ export const DashboardScreen: React.FC<Props> = ({
   onStartWorkout,
   onOpenDrawer,
   onOpenHistory,
+  onOpenSocial,
   workoutSets,
   diaryEntries,
   targets,
   completedSessions
 }) => {
   const displayName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Пользователь';
+  const userAvatar = user.avatar || DEFAULT_AVATAR;
   const totalCals = diaryEntries.reduce((sum, item) => sum + (item.calories || 0), 0);
   const totalSetsToday = workoutSets.length;
   const totalRepsToday = workoutSets.reduce((sum, s) => sum + s.reps, 0);
@@ -45,28 +48,66 @@ export const DashboardScreen: React.FC<Props> = ({
   return (
     <div className="screen dashboard">
       <div className="dash-container">
-        {/* Верхняя интерактивная плашка-триггер вызова шторки питания и профиля */}
-        <div
-          className="dash-top-trigger-bar"
-          onClick={() => {
-            Sound.playClick();
-            onOpenDrawer();
-          }}
-          title="Нажмите чтобы открыть дневник питания, калькулятор и профиль"
-        >
-          <div className="dash-brand">
+        {/* Верхняя интерактивная плашка-меню с разделами */}
+        <div className="dash-top-trigger-bar" style={{ cursor: 'default' }}>
+          <div
+            className="dash-brand"
+            style={{ cursor: 'pointer' }}
+            onClick={() => {
+              Sound.playClick();
+            }}
+          >
             <span>⚡</span> SmartFit
           </div>
 
-          <div className="dash-top-center-pill">
-            <span className="cal-icon">🥑</span>
-            <span className="cal-text">
-              {totalCals} / {targets.calories} ккал
-            </span>
-            <span className="drawer-indicator-arrow">▼ Меню и дневник</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-accent"
+              style={{
+                borderRadius: '100px',
+                padding: '6px 14px',
+                fontSize: '13px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+              onClick={() => {
+                Sound.playClick();
+                onOpenSocial();
+              }}
+              title="Перейти в социальную сеть SmartFit"
+            >
+              <span>💬</span> Социальная сеть
+            </button>
+
+            <div
+              className="dash-top-center-pill"
+              onClick={() => {
+                Sound.playClick();
+                onOpenDrawer();
+              }}
+              style={{ cursor: 'pointer' }}
+              title="Открыть дневник питания и нормы КБЖУ"
+            >
+              <span className="cal-icon">🥑</span>
+              <span className="cal-text">
+                {totalCals} / {targets.calories} ккал
+              </span>
+              <span className="drawer-indicator-arrow">▼ Меню и дневник</span>
+            </div>
           </div>
 
-          <div className="user-pill">
+          <div
+            className="user-pill"
+            onClick={() => {
+              Sound.playClick();
+              onOpenDrawer();
+            }}
+            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="Открыть профиль и настройки аватарки"
+          >
+            <span style={{ fontSize: '18px' }}>{userAvatar}</span>
             <span className="user-tag">{displayName}</span>
           </div>
         </div>

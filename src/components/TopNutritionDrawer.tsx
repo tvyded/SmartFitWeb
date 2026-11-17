@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DailyTargets, DiaryEntry, User } from '../types';
+import { AVATAR_OPTIONS, DEFAULT_AVATAR, DailyTargets, DiaryEntry, User } from '../types';
 import { QUICK_FOODS } from '../utils/storage';
 import { Sound } from '../utils/sound';
 
@@ -7,7 +7,9 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   user: User;
+  onUpdateUser?: (updatedUser: User) => void;
   onLogout: () => void;
+  onOpenSocial?: () => void;
   entries: DiaryEntry[];
   targets: DailyTargets;
   onAddFood: (entry: Omit<DiaryEntry, 'id'>) => void;
@@ -20,7 +22,9 @@ export const TopNutritionDrawer: React.FC<Props> = ({
   isOpen,
   onClose,
   user,
+  onUpdateUser,
   onLogout,
+  onOpenSocial,
   entries,
   targets,
   onAddFood,
@@ -126,8 +130,26 @@ export const TopNutritionDrawer: React.FC<Props> = ({
         <div className="drawer-header">
           <div className="drawer-user-info">
             <span className="drawer-badge">⚡ SmartFit Центр</span>
-            <h3>{user.firstName} {user.lastName}</h3>
-            <p className="drawer-email">{user.email}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px' }}>
+              <div style={{
+                fontSize: '28px',
+                width: '46px',
+                height: '46px',
+                borderRadius: '50%',
+                background: '#FFFFFF',
+                border: '2px solid #171717',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.06)'
+              }}>
+                {user.avatar || DEFAULT_AVATAR}
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px' }}>{user.firstName} {user.lastName}</h3>
+                <p className="drawer-email" style={{ margin: 0 }}>{user.email}</p>
+              </div>
+            </div>
           </div>
           <button
             className="drawer-close-btn"
@@ -161,6 +183,18 @@ export const TopNutritionDrawer: React.FC<Props> = ({
           >
             📊 Калькулятор нормы
           </button>
+          {onOpenSocial && (
+            <button
+              className="tab-btn"
+              onClick={() => {
+                Sound.playClick();
+                onClose();
+                onOpenSocial();
+              }}
+            >
+              💬 Соцсеть
+            </button>
+          )}
           <button
             className={`tab-btn ${activeTab === 'profile' ? 'active' : ''}`}
             onClick={() => {
@@ -501,6 +535,68 @@ export const TopNutritionDrawer: React.FC<Props> = ({
         {activeTab === 'profile' && (
           <div className="calc-panel" style={{ padding: '24px' }}>
             <h3 style={{ marginBottom: '14px' }}>Управление профилем</h3>
+
+            {/* Выбор аватарки из 5 смайликов */}
+            <div style={{ background: '#fafafa', padding: '18px', borderRadius: '14px', border: '1.5px solid #ebebeb', marginBottom: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+                <div style={{
+                  fontSize: '34px',
+                  width: '60px',
+                  height: '60px',
+                  borderRadius: '50%',
+                  background: '#FFFFFF',
+                  border: '2px solid #171717',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)'
+                }}>
+                  {user.avatar || DEFAULT_AVATAR}
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800 }}>Аватар профиля</h4>
+                  <p style={{ margin: '2px 0 0', fontSize: '13px', color: '#737373' }}>
+                    Выберите крутой эмодзи-аватар для отображения в профиле и соцсети
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+                {AVATAR_OPTIONS.map(opt => {
+                  const isSelected = (user.avatar || DEFAULT_AVATAR) === opt.emoji;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      style={{
+                        padding: '12px 6px',
+                        borderRadius: '12px',
+                        border: isSelected ? '2px solid #171717' : '1.5px solid #e5e5e5',
+                        background: isSelected ? '#ffffff' : '#fafafa',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        transition: 'all 0.15s ease',
+                        boxShadow: isSelected ? '0 4px 12px rgba(0,0,0,0.12)' : 'none',
+                        transform: isSelected ? 'scale(1.04)' : 'none'
+                      }}
+                      onClick={() => {
+                        Sound.playClick();
+                        if (onUpdateUser) {
+                          onUpdateUser({ ...user, avatar: opt.emoji });
+                        }
+                      }}
+                      title={opt.name}
+                    >
+                      <div style={{ fontSize: '28px', lineHeight: 1 }}>{opt.emoji}</div>
+                      <div style={{ fontSize: '11px', fontWeight: 700, marginTop: '6px', color: isSelected ? '#171717' : '#888' }}>
+                        {opt.name}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div style={{ background: '#fafafa', padding: '16px', borderRadius: '12px', border: '1px solid #eee', marginBottom: '20px' }}>
               <div style={{ marginBottom: '8px' }}>
                 <span style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', fontWeight: 700 }}>Имя и фамилия</span>

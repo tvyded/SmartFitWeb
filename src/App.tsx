@@ -9,6 +9,7 @@ import { WorkoutBuilder } from './components/WorkoutBuilder';
 import { WorkoutRunner } from './components/WorkoutRunner';
 import { WorkoutHistoryScreen } from './components/WorkoutHistoryScreen';
 import { TopNutritionDrawer } from './components/TopNutritionDrawer';
+import { SocialFeedScreen } from './components/SocialFeedScreen';
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => Storage.getUser());
@@ -43,6 +44,11 @@ export const App: React.FC = () => {
     Storage.setUser(user);
     setCurrentUser(user);
     setCurrentScreen('dashboard');
+  };
+
+  const handleUpdateUser = (updatedUser: User) => {
+    Storage.setUser(updatedUser);
+    setCurrentUser({ ...updatedUser });
   };
 
   const handleLogout = () => {
@@ -105,7 +111,9 @@ export const App: React.FC = () => {
           isOpen={isDrawerOpen}
           onClose={() => setIsDrawerOpen(false)}
           user={currentUser}
+          onUpdateUser={handleUpdateUser}
           onLogout={handleLogout}
+          onOpenSocial={() => setCurrentScreen('social')}
           entries={diaryEntries}
           targets={dailyTargets}
           onAddFood={handleAddFood}
@@ -146,10 +154,18 @@ export const App: React.FC = () => {
           onStartWorkout={() => setCurrentScreen('builder')}
           onOpenDrawer={() => setIsDrawerOpen(true)}
           onOpenHistory={() => setCurrentScreen('history')}
+          onOpenSocial={() => setCurrentScreen('social')}
           workoutSets={workoutSets}
           diaryEntries={diaryEntries}
           targets={dailyTargets}
           completedSessions={completedSessions}
+        />
+      )}
+
+      {currentScreen === 'social' && currentUser && (
+        <SocialFeedScreen
+          user={currentUser}
+          onBack={() => setCurrentScreen('dashboard')}
         />
       )}
 
