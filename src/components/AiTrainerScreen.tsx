@@ -44,6 +44,22 @@ export const AiTrainerScreen: React.FC<Props> = ({ onBack, workoutSets, onSaveSe
   const engineRef = useRef<BaseEngine>(new SquatEngine());
   const lastErrorRef = useRef(false);
   const lastRepsRef = useRef(0);
+  const countdownActiveRef = useRef(false);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownResolveRef = useRef<(() => void) | null>(null);
+
+  const cancelCountdown = useCallback(() => {
+    countdownActiveRef.current = false;
+    if (countdownTimerRef.current) {
+      clearTimeout(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    if (countdownResolveRef.current) {
+      countdownResolveRef.current();
+      countdownResolveRef.current = null;
+    }
+    setIsCountingDown(false);
+  }, []);
 
   // Switch engine on exercise change
   useEffect(() => {
@@ -135,29 +151,42 @@ export const AiTrainerScreen: React.FC<Props> = ({ onBack, workoutSets, onSaveSe
 
   // Countdown routine
   const runCountdown = async (): Promise<boolean> => {
+    cancelCountdown();
+    countdownActiveRef.current = true;
     setIsCountingDown(true);
+
     const steps = [
-      { text: '3', isGo: false },
-      { text: '2', isGo: false },
-      { text: '1', isGo: false },
-      { text: 'СТАРТ!', isGo: true }
+      { text: '3', isGo: false, delay: 900 },
+      { text: '2', isGo: false, delay: 900 },
+      { text: '1', isGo: false, delay: 900 },
+      { text: 'СТАРТ!', isGo: true, delay: 650 }
     ];
 
     for (const step of steps) {
+      if (!countdownActiveRef.current) return false;
       setCountdownText(step.text);
       setCountdownIsGo(step.isGo);
 
       if (step.isGo) {
         Sound.playCountdownGo();
-        await new Promise(r => setTimeout(r, 650));
       } else {
         Sound.playCountdownTick();
-        await new Promise(r => setTimeout(r, 900));
       }
+
+      await new Promise<void>(resolve => {
+        countdownResolveRef.current = resolve;
+        countdownTimerRef.current = setTimeout(() => {
+          countdownTimerRef.current = null;
+          countdownResolveRef.current = null;
+          resolve();
+        }, step.delay);
+      });
+
+      if (!countdownActiveRef.current) return false;
     }
 
     setIsCountingDown(false);
-    return true;
+    return countdownActiveRef.current;
   };
 
   // Start real webcam and MediaPipe model
@@ -208,6 +237,7 @@ export const AiTrainerScreen: React.FC<Props> = ({ onBack, workoutSets, onSaveSe
   };
 
   const stopCamera = () => {
+    cancelCountdown();
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
       animFrameIdRef.current = null;
@@ -502,14 +532,6 @@ export const AiTrainerScreen: React.FC<Props> = ({ onBack, workoutSets, onSaveSe
                       <span className="status-indicator-dot" style={{ backgroundColor: statusColor }} />
                       <span className="status-text">{statusText}</span>
                     </div>
-
-                    {angles && Object.keys(angles).length > 0 && (
-                      <div className="angle-badge">
-                        {Object.entries(angles)
-                          .map(([k, v]) => `${k === 'knee' ? 'Колено' : k === 'elbow' ? 'Локоть' : k}: ${v}°`)
-                          .join(' | ')}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>

@@ -65,10 +65,31 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
   const engineRef = useRef<BaseEngine>(new SquatEngine());
   const lastErrorRef = useRef(false);
   const lastRepsRef = useRef(0);
+  const isCompletingSetRef = useRef(false);
+  const autoCompleteTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const handlePoseLandmarksRef = useRef<(landmarks: Landmark[]) => void>(() => {});
+  const handleCompleteSetRef = useRef<(customReps?: number) => void>(() => {});
+  const countdownActiveRef = useRef(false);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownResolveRef = useRef<(() => void) | null>(null);
 
-  // Switch engine on exercise change
-  useEffect(() => {
+  const cancelCountdown = useCallback(() => {
+    countdownActiveRef.current = false;
+    if (countdownTimerRef.current) {
+      clearTimeout(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    if (countdownResolveRef.current) {
+      countdownResolveRef.current();
+      countdownResolveRef.current = null;
+    }
+  }, []);
+
+  // Reset exercise engine and states for a fresh set or exercise
+  const resetSetState = useCallback(() => {
     if (!currentEx) return;
+
+    cancelCountdown();
 
     if (currentEx.key === 'squat') {
       engineRef.current = new SquatEngine();
@@ -76,9 +97,17 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
       engineRef.current = new ShouldersEngine();
     } else if (currentEx.key === 'biceps') {
       engineRef.current = new BicepsEngine();
+    } else {
+      engineRef.current = new SquatEngine();
     }
 
     engineRef.current.reset();
+    isCompletingSetRef.current = false;
+    if (autoCompleteTimeoutRef.current) {
+      clearTimeout(autoCompleteTimeoutRef.current);
+      autoCompleteTimeoutRef.current = null;
+    }
+
     const st = engineRef.current.getState();
     setCurrentReps(0);
     lastRepsRef.current = 0;
@@ -88,7 +117,18 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
     lastErrorRef.current = st.errorFlag;
     setAngles(st.angles || {});
     setCameraError(null);
-  }, [currentExerciseIndex, currentEx]);
+    setExerciseTimer(0);
+
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('select_exercise', { exercise: currentEx.key });
+      socketRef.current.emit('reset_exercise');
+    }
+  }, [currentEx, cancelCountdown]);
+
+  // Switch engine and reset whenever exercise or set changes
+  useEffect(() => {
+    resetSetState();
+  }, [currentExerciseIndex, currentSetIndex, resetSetState]);
 
   // Connect socket for Python MediaPipe backend (optional enhancement for local PC)
   useEffect(() => {
@@ -101,6 +141,7 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
     socket.on('connect', () => {
       if (currentEx?.hasAiCamera) {
         socket.emit('select_exercise', { exercise: currentEx.key });
+        socket.emit('reset_exercise');
       }
     });
 
@@ -112,127 +153,10 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
     };
   }, []);
 
-  // Update exercise state from landmarks detected by MediaPipe
-  const handlePoseLandmarks = useCallback((landmarks: Landmark[]) => {
-    if (!canvasRef.current || !videoRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Synchronize canvas size with video feed
-    const vw = videoRef.current.videoWidth || 640;
-    const vh = videoRef.current.videoHeight || 480;
-    if (canvas.width !== vw || canvas.height !== vh) {
-      canvas.width = vw;
-      canvas.height = vh;
-    }
-
-    if (landmarks && landmarks.length >= 17) {
-      // Process exercise logic using exact biomechanics engine
-      const state = engineRef.current.process(landmarks);
-
-      // Rep count bump and sound
-      if (state.reps > lastRepsRef.current) {
-        Sound.playSuccess();
-        setBumpReps(true);
-        setTimeout(() => setBumpReps(false), 250);
-      }
-      lastRepsRef.current = state.reps;
-      setCurrentReps(state.reps);
-
-      if (state.errorFlag && !lastErrorRef.current) {
-        Sound.playError();
-      }
-      lastErrorRef.current = !!state.errorFlag;
-
-      setStatusText(state.statusText);
-      setStatusColor(state.statusColor);
-      setErrorFlag(!!state.errorFlag);
-      if (state.angles) setAngles(state.angles);
-
-      // Draw glowing skeleton overlay
-      drawSkeletonOnCanvas(ctx, canvas.width, canvas.height, landmarks, !!state.errorFlag);
-    } else {
-      // No person detected or person out of bounds
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      setStatusText('👉 Встаньте перед камерой так, чтобы тело было видно');
-      setStatusColor('#4a4a4a');
-    }
-  }, []);
-
-  // Countdown before starting set
-  const runPreSetCountdown = useCallback(async () => {
-    setPhase('countdown');
-    const steps = [
-      { text: '3', isGo: false },
-      { text: '2', isGo: false },
-      { text: '1', isGo: false },
-      { text: 'СТАРТ!', isGo: true }
-    ];
-
-    for (const step of steps) {
-      setCountdownText(step.text);
-      setCountdownIsGo(step.isGo);
-      if (step.isGo) {
-        Sound.playCountdownGo();
-        await new Promise(r => setTimeout(r, 650));
-      } else {
-        Sound.playCountdownTick();
-        await new Promise(r => setTimeout(r, 850));
-      }
-    }
-
-    setPhase('exercise');
-  }, []);
-
-  // Initialize REAL webcam and MediaPipe Vision Core
-  const startCameraFeed = useCallback(async () => {
-    if (!currentEx?.hasAiCamera) return;
-    setCameraError(null);
-    setModelStatus('loading');
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-        audio: false
-      });
-
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-
-        if (canvasRef.current) {
-          canvasRef.current.width = videoRef.current.videoWidth || 640;
-          canvasRef.current.height = videoRef.current.videoHeight || 480;
-        }
-      }
-
-      // Initialize client-side MediaPipe Pose
-      if (!poseServiceRef.current) {
-        poseServiceRef.current = new PoseService({
-          onResults: (landmarks) => {
-            handlePoseLandmarks(landmarks);
-          },
-          onStatusChange: (status) => {
-            if (status === 'ready') setModelStatus('ready');
-            if (status === 'error') setModelStatus('idle');
-          }
-        });
-        await poseServiceRef.current.initialize();
-      }
-
-      await runPreSetCountdown();
-    } catch (err: any) {
-      console.warn('Webcam permission error:', err);
-      setModelStatus('idle');
-      setCameraError('Веб-камера недоступна. Пожалуйста, подключите камеру и разрешите доступ к ней в настройках браузера.');
-    }
-  }, [currentEx, handlePoseLandmarks, runPreSetCountdown]);
-
   // Clean up camera stream and frame sending
   const stopCameraFeed = useCallback(() => {
+    cancelCountdown();
+
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
       animFrameIdRef.current = null;
@@ -251,85 +175,22 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
       const ctx = canvasRef.current.getContext('2d');
       if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     }
-  }, []);
-
-  // Frame processing loop with MediaPipe Pose
-  useEffect(() => {
-    if (phase !== 'exercise' || !currentEx?.hasAiCamera || cameraError) return;
-
-    let isActive = true;
-
-    const renderLoop = async () => {
-      if (!isActive) return;
-
-      if (videoRef.current && videoRef.current.readyState >= 2 && poseServiceRef.current) {
-        await poseServiceRef.current.processFrame(videoRef.current);
-      }
-
-      if (isActive) {
-        animFrameIdRef.current = requestAnimationFrame(renderLoop);
-      }
-    };
-
-    animFrameIdRef.current = requestAnimationFrame(renderLoop);
-
-    return () => {
-      isActive = false;
-      if (animFrameIdRef.current) {
-        cancelAnimationFrame(animFrameIdRef.current);
-        animFrameIdRef.current = null;
-      }
-    };
-  }, [phase, currentEx, cameraError]);
-
-  // Start set sequence
-  useEffect(() => {
-    if (phase === 'finished') return;
-
-    if (currentEx?.hasAiCamera) {
-      startCameraFeed();
-    } else {
-      if (currentEx?.unit === 'сек.') {
-        setExerciseTimer(0);
-        setIsExerciseTimerRunning(true);
-      }
-      runPreSetCountdown();
-    }
-
-    return () => {
-      stopCameraFeed();
-    };
-  }, [currentExerciseIndex, currentSetIndex, currentEx, startCameraFeed, stopCameraFeed, runPreSetCountdown]);
-
-  // Destroy pose service on unmount
-  useEffect(() => {
-    return () => {
-      if (poseServiceRef.current) {
-        poseServiceRef.current.destroy();
-        poseServiceRef.current = null;
-      }
-      stopCameraFeed();
-    };
-  }, [stopCameraFeed]);
-
-  // Timer for manual timed exercises (like Plank)
-  useEffect(() => {
-    if (phase === 'exercise' && isExerciseTimerRunning) {
-      exTimerRef.current = setInterval(() => {
-        setExerciseTimer(prev => prev + 1);
-      }, 1000);
-    } else if (exTimerRef.current) {
-      clearInterval(exTimerRef.current);
-    }
-    return () => {
-      if (exTimerRef.current) clearInterval(exTimerRef.current);
-    };
-  }, [phase, isExerciseTimerRunning]);
+  }, [cancelCountdown]);
 
   // Finish current set and initiate Rest Timer
-  const handleCompleteSet = () => {
-    const finalReps = currentEx.hasAiCamera
-      ? Math.max(1, currentReps)
+  const handleCompleteSet = useCallback((customReps?: number | React.MouseEvent) => {
+    cancelCountdown();
+
+    if (autoCompleteTimeoutRef.current) {
+      clearTimeout(autoCompleteTimeoutRef.current);
+      autoCompleteTimeoutRef.current = null;
+    }
+    isCompletingSetRef.current = true;
+
+    const finalReps = typeof customReps === 'number'
+      ? customReps
+      : currentEx.hasAiCamera
+      ? Math.max(1, lastRepsRef.current || currentReps)
       : currentEx.unit === 'сек.'
       ? Math.max(1, exerciseTimer || currentEx.targetReps)
       : currentEx.targetReps;
@@ -389,7 +250,280 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
     // Transition to Rest phase
     setPhase('rest');
     setRestSecondsLeft(restDurationSeconds);
-  };
+  }, [
+    currentEx,
+    currentReps,
+    exerciseTimer,
+    currentSetIndex,
+    currentExerciseIndex,
+    exercises.length,
+    completedSetsCount,
+    completedRepsCount,
+    sessionConfig,
+    onSaveSet,
+    onSaveSession,
+    restDurationSeconds,
+    stopCameraFeed
+  ]);
+
+  handleCompleteSetRef.current = handleCompleteSet;
+
+  // Update exercise state from landmarks detected by MediaPipe
+  const handlePoseLandmarks = useCallback((landmarks: Landmark[]) => {
+    if (!canvasRef.current || !videoRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Synchronize canvas size with video feed
+    const vw = videoRef.current.videoWidth || 640;
+    const vh = videoRef.current.videoHeight || 480;
+    if (canvas.width !== vw || canvas.height !== vh) {
+      canvas.width = vw;
+      canvas.height = vh;
+    }
+
+    if (landmarks && landmarks.length >= 17) {
+      // If we are already finishing this set, keep skeleton rendered and avoid re-triggering
+      if (isCompletingSetRef.current) {
+        drawSkeletonOnCanvas(ctx, canvas.width, canvas.height, landmarks, false);
+        return;
+      }
+
+      // Process exercise logic using exact biomechanics engine
+      const state = engineRef.current.process(landmarks);
+
+      // Rep count bump and sound
+      if (state.reps > lastRepsRef.current) {
+        Sound.playSuccess();
+        setBumpReps(true);
+        setTimeout(() => setBumpReps(false), 250);
+      }
+      lastRepsRef.current = state.reps;
+      setCurrentReps(state.reps);
+
+      if (state.errorFlag && !lastErrorRef.current) {
+        Sound.playError();
+      }
+      lastErrorRef.current = !!state.errorFlag;
+
+      // Draw glowing skeleton overlay
+      drawSkeletonOnCanvas(ctx, canvas.width, canvas.height, landmarks, !!state.errorFlag);
+
+      // Auto-advance check: did we reach target reps for vision exercise?
+      const targetReps = currentEx?.targetReps ?? 0;
+      if (targetReps > 0 && state.reps >= targetReps && !isCompletingSetRef.current) {
+        isCompletingSetRef.current = true;
+        setStatusText(`🎉 Отлично! Выполнено ${state.reps} из ${targetReps} повт.`);
+        setStatusColor('#00aa55');
+        setErrorFlag(false);
+
+        if (autoCompleteTimeoutRef.current) {
+          clearTimeout(autoCompleteTimeoutRef.current);
+        }
+        autoCompleteTimeoutRef.current = setTimeout(() => {
+          handleCompleteSetRef.current(state.reps);
+        }, 700);
+        return;
+      }
+
+      setStatusText(state.statusText);
+      setStatusColor(state.statusColor);
+      setErrorFlag(!!state.errorFlag);
+      if (state.angles) setAngles(state.angles);
+    } else {
+      // No person detected or person out of bounds
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!isCompletingSetRef.current) {
+        setStatusText('👉 Встаньте перед камерой так, чтобы тело было видно');
+        setStatusColor('#4a4a4a');
+      }
+    }
+  }, [currentEx]);
+
+  handlePoseLandmarksRef.current = handlePoseLandmarks;
+
+  // Countdown before starting set with cancellation support
+  const runPreSetCountdown = useCallback(async () => {
+    cancelCountdown();
+    countdownActiveRef.current = true;
+    setPhase('countdown');
+
+    const steps = [
+      { text: '3', isGo: false, delay: 850 },
+      { text: '2', isGo: false, delay: 850 },
+      { text: '1', isGo: false, delay: 850 },
+      { text: 'СТАРТ!', isGo: true, delay: 650 }
+    ];
+
+    for (const step of steps) {
+      if (!countdownActiveRef.current) return;
+      setCountdownText(step.text);
+      setCountdownIsGo(step.isGo);
+
+      if (step.isGo) {
+        Sound.playCountdownGo();
+      } else {
+        Sound.playCountdownTick();
+      }
+
+      await new Promise<void>(resolve => {
+        countdownResolveRef.current = resolve;
+        countdownTimerRef.current = setTimeout(() => {
+          countdownTimerRef.current = null;
+          countdownResolveRef.current = null;
+          resolve();
+        }, step.delay);
+      });
+
+      if (!countdownActiveRef.current) return;
+    }
+
+    if (countdownActiveRef.current) {
+      setPhase('exercise');
+    }
+  }, [cancelCountdown]);
+
+  // Initialize REAL webcam and MediaPipe Vision Core
+  const startCameraFeed = useCallback(async () => {
+    if (!currentEx?.hasAiCamera) return;
+    setCameraError(null);
+    setModelStatus('loading');
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        audio: false
+      });
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+
+        if (canvasRef.current) {
+          canvasRef.current.width = videoRef.current.videoWidth || 640;
+          canvasRef.current.height = videoRef.current.videoHeight || 480;
+        }
+      }
+
+      // Initialize client-side MediaPipe Pose
+      if (!poseServiceRef.current) {
+        poseServiceRef.current = new PoseService({
+          onResults: (landmarks) => {
+            handlePoseLandmarksRef.current(landmarks);
+          },
+          onStatusChange: (status) => {
+            if (status === 'ready') setModelStatus('ready');
+            if (status === 'error') setModelStatus('idle');
+          }
+        });
+        await poseServiceRef.current.initialize();
+      }
+
+      await runPreSetCountdown();
+    } catch (err: any) {
+      console.warn('Webcam permission error:', err);
+      setModelStatus('idle');
+      setCameraError('Веб-камера недоступна. Пожалуйста, подключите камеру и разрешите доступ к ней в настройках браузера.');
+    }
+  }, [currentEx, runPreSetCountdown]);
+
+  // Frame processing loop with MediaPipe Pose
+  useEffect(() => {
+    if (phase !== 'exercise' || !currentEx?.hasAiCamera || cameraError) return;
+
+    let isActive = true;
+
+    const renderLoop = async () => {
+      if (!isActive) return;
+
+      if (videoRef.current && videoRef.current.readyState >= 2 && poseServiceRef.current) {
+        await poseServiceRef.current.processFrame(videoRef.current);
+      }
+
+      if (isActive) {
+        animFrameIdRef.current = requestAnimationFrame(renderLoop);
+      }
+    };
+
+    animFrameIdRef.current = requestAnimationFrame(renderLoop);
+
+    return () => {
+      isActive = false;
+      if (animFrameIdRef.current) {
+        cancelAnimationFrame(animFrameIdRef.current);
+        animFrameIdRef.current = null;
+      }
+    };
+  }, [phase, currentEx, cameraError]);
+
+  // Start set sequence
+  useEffect(() => {
+    if (phase === 'finished') return;
+
+    if (currentEx?.hasAiCamera) {
+      startCameraFeed();
+    } else {
+      if (currentEx?.unit === 'сек.') {
+        setExerciseTimer(0);
+        setIsExerciseTimerRunning(true);
+      }
+      runPreSetCountdown();
+    }
+
+    return () => {
+      stopCameraFeed();
+    };
+  }, [currentExerciseIndex, currentSetIndex, currentEx, startCameraFeed, stopCameraFeed, runPreSetCountdown]);
+
+  // Destroy pose service and cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      cancelCountdown();
+      if (autoCompleteTimeoutRef.current) {
+        clearTimeout(autoCompleteTimeoutRef.current);
+        autoCompleteTimeoutRef.current = null;
+      }
+      if (poseServiceRef.current) {
+        poseServiceRef.current.destroy();
+        poseServiceRef.current = null;
+      }
+      stopCameraFeed();
+    };
+  }, [stopCameraFeed, cancelCountdown]);
+
+  // Timer for manual timed exercises (like Plank)
+  useEffect(() => {
+    if (phase === 'exercise' && isExerciseTimerRunning) {
+      exTimerRef.current = setInterval(() => {
+        setExerciseTimer(prev => {
+          const next = prev + 1;
+          if (
+            currentEx?.unit === 'сек.' &&
+            currentEx.targetReps > 0 &&
+            next >= currentEx.targetReps &&
+            !isCompletingSetRef.current
+          ) {
+            isCompletingSetRef.current = true;
+            if (autoCompleteTimeoutRef.current) {
+              clearTimeout(autoCompleteTimeoutRef.current);
+            }
+            autoCompleteTimeoutRef.current = setTimeout(() => {
+              handleCompleteSetRef.current(next);
+            }, 600);
+          }
+          return next;
+        });
+      }, 1000);
+    } else if (exTimerRef.current) {
+      clearInterval(exTimerRef.current);
+    }
+    return () => {
+      if (exTimerRef.current) clearInterval(exTimerRef.current);
+    };
+  }, [phase, isExerciseTimerRunning, currentEx]);
 
   // Rest timer countdown
   useEffect(() => {
@@ -413,20 +547,24 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
 
   // Move to next set or next exercise
   const advanceToNextSet = () => {
+    cancelCountdown();
     if (restTimerRef.current) clearInterval(restTimerRef.current);
+    if (autoCompleteTimeoutRef.current) {
+      clearTimeout(autoCompleteTimeoutRef.current);
+      autoCompleteTimeoutRef.current = null;
+    }
+    isCompletingSetRef.current = false;
+    engineRef.current.reset();
+    setCurrentReps(0);
+    lastRepsRef.current = 0;
+    setExerciseTimer(0);
 
     if (currentSetIndex < currentEx.setsCount) {
       setCurrentSetIndex(prev => prev + 1);
-      setCurrentReps(0);
-      lastRepsRef.current = 0;
-      setExerciseTimer(0);
       setPhase('countdown');
     } else if (currentExerciseIndex < exercises.length - 1) {
       setCurrentExerciseIndex(prev => prev + 1);
       setCurrentSetIndex(1);
-      setCurrentReps(0);
-      lastRepsRef.current = 0;
-      setExerciseTimer(0);
       setPhase('countdown');
     } else {
       setPhase('finished');
@@ -540,6 +678,10 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
               onClick={() => {
                 if (window.confirm('Прервать текущую тренировку и выйти в меню?')) {
                   Sound.playClick();
+                  if (autoCompleteTimeoutRef.current) {
+                    clearTimeout(autoCompleteTimeoutRef.current);
+                    autoCompleteTimeoutRef.current = null;
+                  }
                   stopCameraFeed();
                   onExit();
                 }
@@ -641,14 +783,6 @@ export const WorkoutRunner: React.FC<Props> = ({ sessionConfig, onExit, onSaveSe
                         <span className="status-indicator-dot" style={{ backgroundColor: statusColor }} />
                         <span className="status-text">{statusText}</span>
                       </div>
-
-                      {angles && Object.keys(angles).length > 0 && (
-                        <div className="angle-badge">
-                          {Object.entries(angles)
-                            .map(([k, v]) => `${k === 'knee' ? 'Колено' : k === 'elbow' ? 'Локоть' : k}: ${v}°`)
-                            .join(' | ')}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
